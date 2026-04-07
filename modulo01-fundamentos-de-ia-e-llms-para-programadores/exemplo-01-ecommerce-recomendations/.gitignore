@@ -80,7 +80,7 @@ out
 
 # Nuxt.js build / generate output
 .nuxt
-.output
+dist
 
 # Gatsby files
 .cache/
@@ -134,7 +134,6 @@ out
 !.yarn/sdks
 !.yarn/versions
 
-# Vite files
+# Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
-.vite/
