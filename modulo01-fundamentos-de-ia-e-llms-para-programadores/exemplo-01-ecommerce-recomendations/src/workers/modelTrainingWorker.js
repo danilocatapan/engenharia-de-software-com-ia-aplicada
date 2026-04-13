@@ -4,6 +4,13 @@ import { workerEvents } from '../events/constants.js';
 console.log('Model training worker initialized');
 let _globalCtx = {};
 
+const WEIGHTS = {
+    category: 0.4,
+    color: 0.3,
+    price: 0.2,
+    age: 0.1,
+};
+
 const normalize = (value, min, max) => (value - min) / ((max - min) || 1);
 
 function makeContext(catalog, users) {
@@ -30,15 +37,9 @@ function makeContext(catalog, users) {
     const colors = [...new Set(catalog.map(p => p.color))];
     const categories = [...new Set(catalog.map(p => p.category))];
 
-    const colorIndex = Object.entries(
-        colors.map((color, index) => {
-            return [color, index]
-        }))
+    const colorIndex = colors.map((color, index) => [color, index]);
 
-    const categoriesIndex = Object.entries(
-        categories.map((category, index) => {
-            return [category, index]
-        })) 
+    const categoriesIndex = categories.map((category, index) => [category, index]); 
 
     // Computar a média de idade dos compradores por produto
     // (ajuda a personalizar as recomendações com base na idade)
@@ -74,7 +75,24 @@ function makeContext(catalog, users) {
         numCategories: categories.length,
         numColors: colors.length,
         dimentions: 2 + categories.length + colors.length, // idade + preço + categorias + cores
+        productAvgAgeNorm,
     };
+}
+
+function encodeProduct(product, context) {
+    // normalizando dados para ficar de 0 a 1
+    const price = tf.tensor1d([normalize(product.price, context.minPrice, context.maxPrice) * WEIGHTS.price]);
+    const age = tf.tensor1d([context.productAvgAgeNorm[product.name] ?? 0.5 * WEIGHTS.age]);
+    
+    const categoryEntry = context.categoriesIndex.find(([cat]) => cat === product.category);
+    const categoryIndex = categoryEntry ? categoryEntry[1] : 0;
+    const category = tf.oneHot(categoryIndex, context.numCategories).mul(WEIGHTS.category);
+    
+    const colorEntry = context.colorIndex.find(([col]) => col === product.color);
+    const colorIndex = colorEntry ? colorEntry[1] : 0;
+    const color = tf.oneHot(colorIndex, context.numColors).mul(WEIGHTS.color);
+    
+    return tf.concat1d([price, age, category, color]);
 }
 
 async function trainModel({ users }) {
@@ -84,6 +102,16 @@ async function trainModel({ users }) {
         const catalog = await (await fetch('/data/products.json')).json();
         
         const context = makeContext(catalog, users)
+
+        context.productVectors = catalog.map(product => {
+            return {
+                name: product.name,
+                meta: {...product},
+                vector: encodeProduct(product, context).dataSync(), // Convertendo o tensor para array normal para facilitar o uso posterior
+            }
+        });
+        
+        _globalCtx = context;
 
         postMessage({
             type: workerEvents.trainingLog,
